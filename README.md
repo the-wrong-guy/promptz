@@ -90,6 +90,28 @@ The engine runs a 7-step optimization pipeline:
 6. **Token Count** (Post-optimization)
 7. **Metrics Calculation**
 
+## Benchmarks
+
+Use `go run scripts/benchmark/main.go` to run the benchmarks:
+
+| Sample Name | Mode | Before | After | Reduction |
+| :--- | :--- | :--- | :--- | :--- |
+| Tech Support (Verbose) | aggressive | 114 | 45 | **60.5%** |
+| General Chat (Greeting) | aggressive | 32 | 19 | **40.6%** |
+| Code Request (Complex) | aggressive | 74 | 33 | **55.4%** |
+| Repeated Context | aggressive | 26 | 13 | **50.0%** |
+
+## Architecture
+
+The engine runs a 7-step optimization pipeline:
+1. **Token Count** (Pre-optimization)
+2. **Normalize** (Whitespace, filler phrases)
+3. **Compress** (Strip parentheticals, verbose patterns)
+4. **Similarity Dedup** (Merge near-duplicates)
+5. **NLP Rewrite** (POS Tagging + TF-IDF)
+6. **Token Count** (Post-optimization)
+7. **Metrics Calculation**
+
 ## Contributing
 
 We welcome contributions to make `promptz` even better!
