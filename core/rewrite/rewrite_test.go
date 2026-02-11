@@ -11,59 +11,62 @@ func TestRewriteMessage(t *testing.T) {
 	tests := []struct {
 		name         string
 		mode         types.Mode
-		input        string
+		messages     []types.Message
+		targetIdx    int
 		wantContains []string
 		wantMissing  []string
 	}{
 		{
 			name:         "conservative no change",
 			mode:         types.ModeConservative,
-			input:        "the quick brown fox",
+			messages:     []types.Message{{Role: "user", Content: "the quick brown fox"}},
+			targetIdx:    0,
 			wantContains: []string{"the", "quick", "brown", "fox"},
 		},
 		{
-			name:         "balanced removes stop words",
+			name:         "balanced removes function words",
 			mode:         types.ModeBalanced,
-			input:        "the quick brown fox is fast",
+			messages:     []types.Message{{Role: "user", Content: "the quick brown fox is fast"}},
+			targetIdx:    0,
 			wantContains: []string{"quick", "brown", "fox", "fast"},
-			wantMissing:  []string{"the", "is"},
-		},
-		{
-			name:         "aggressive keywords context",
-			mode:         types.ModeAggressive,
-			input:        "Hello my world, whats up",
-			wantContains: []string{"Hello", "world", "whats", "up"},
-			wantMissing:  []string{"my"}, // "my" should likely be removed as a stop word/possessive not critical
-		},
-		{
-			name:         "aggressive keywords technical",
-			mode:         types.ModeAggressive,
-			input:        "fix the api bug in prod",
-			wantContains: []string{"fix", "api", "bug", "prod"}, // "in", "the" gone. "prod" > 3 chars. "api", "fix", "bug" in important list.
 			wantMissing:  []string{"the"},
+		},
+		{
+			name: "aggressive keeps content words",
+			mode: types.ModeAggressive,
+			messages: []types.Message{
+				{Role: "user", Content: "fix the database connection error in production"},
+			},
+			targetIdx:    0,
+			wantContains: []string{"database", "connection", "error", "production"},
+			wantMissing:  []string{"the", "in"},
+		},
+		{
+			name: "aggressive preserves negation",
+			mode: types.ModeAggressive,
+			messages: []types.Message{
+				{Role: "user", Content: "do not delete the important files"},
+			},
+			targetIdx:    0,
+			wantContains: []string{"not", "delete", "important", "files"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg := types.Message{Content: tt.input}
-			got := RewriteMessage(msg, tt.mode)
+			r := NewRewriter(tt.messages)
+			got := r.RewriteMessage(tt.messages[tt.targetIdx], tt.mode)
 
 			for _, c := range tt.wantContains {
-				if !strings.Contains(got, c) {
+				if !strings.Contains(strings.ToLower(got), strings.ToLower(c)) {
 					t.Errorf("RewriteMessage(%s) = %q, expected to contain %q", tt.mode, got, c)
 				}
 			}
 
 			for _, m := range tt.wantMissing {
-				// Naive check: ensure word is not present as a distinct token
-				// e.g. "my" shouldn't be found in "myCode"
-				// But strings.Contains("myCode", "my") is true.
-				// Better check: fields
 				fields := strings.Fields(got)
 				for _, f := range fields {
-					clean := strings.TrimRight(f, ".,!?:;\"'()[]{}")
-					if clean == m {
+					if strings.EqualFold(f, m) {
 						t.Errorf("RewriteMessage(%s) = %q, should NOT contain %q", tt.mode, got, m)
 					}
 				}

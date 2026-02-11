@@ -1,15 +1,25 @@
 package engine
 
 import (
+	"github.com/the-wrong-guy/promptz/core/nlp/compress"
+	"github.com/the-wrong-guy/promptz/core/nlp/similarity"
 	"github.com/the-wrong-guy/promptz/core/normalize"
 	"github.com/the-wrong-guy/promptz/core/rewrite"
 	"github.com/the-wrong-guy/promptz/core/tokenizer"
 	"github.com/the-wrong-guy/promptz/core/types"
 )
 
-// Optimize processes the request through the efficiency pipeline.
+// Optimize processes the request through the NLP-enhanced efficiency pipeline.
+//
+// Pipeline steps:
+//  1. Token count before
+//  2. Normalize messages (trim, collapse spaces, remove filler phrases)
+//  3. Sentence compression (remove parentheticals, verbose clauses)
+//  4. Similarity-based deduplication (near-duplicate removal)
+//  5. NLP-enhanced rewrite (POS tagging + TF-IDF scored keyword extraction)
+//  6. Token count after
+//  7. Return metrics
 func Optimize(req types.OptimizeRequest) types.OptimizeResponse {
-	// Initialize tokenizer
 	tok := tokenizer.NewSimpleTokenizer()
 
 	// 1. Calculate tokens before
@@ -18,22 +28,12 @@ func Optimize(req types.OptimizeRequest) types.OptimizeResponse {
 		tokensBefore += tok.CountTokens(msg.Content)
 	}
 
-	// 2. Normalize & Rewrite
-	optimizedMsgs := make([]types.Message, 0, len(req.Messages))
+	// 2. Normalize text
 	normOpts := normalize.DefaultOptions()
-
-	// Pre-process messages
-	// We first normalize text, then deduplicate messages if needed.
-	// Actually, strict requirement: "deduplicate consecutive identical messages"
-	// and "trim whitespace etc".
-
-	// Let's create a temporary slice of normalized messages first
 	normalizedMsgs := make([]types.Message, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		cleaned := normalize.NormalizeText(msg.Content, normOpts)
 		if cleaned == "" {
-			// Option: remove empty messages? or keep them?
-			// Generally empty messages are useless tokens.
 			continue
 		}
 		normalizedMsgs = append(normalizedMsgs, types.Message{
@@ -42,12 +42,37 @@ func Optimize(req types.OptimizeRequest) types.OptimizeResponse {
 		})
 	}
 
-	// Deduplicate
-	dedupedMsgs := normalize.DeduplicateMessages(normalizedMsgs)
+	// 3. Sentence compression (strip parentheticals, filler clauses)
+	compressedMsgs := make([]types.Message, 0, len(normalizedMsgs))
+	for _, msg := range normalizedMsgs {
+		compressed := compress.Compress(msg.Content)
+		if compressed == "" {
+			continue
+		}
+		compressedMsgs = append(compressedMsgs, types.Message{
+			Role:    msg.Role,
+			Content: compressed,
+		})
+	}
 
-	// Rewrite
+	// 4. Similarity-based deduplication
+	simOpts := similarity.DefaultOptions()
+	// Use stricter threshold for conservative mode, looser for aggressive
+	switch req.Mode {
+	case types.ModeConservative:
+		simOpts.Threshold = 0.9 // Only near-exact duplicates
+	case types.ModeBalanced:
+		simOpts.Threshold = 0.7
+	case types.ModeAggressive:
+		simOpts.Threshold = 0.5 // Catch more near-duplicates
+	}
+	dedupedMsgs := similarity.DeduplicateBySimilarity(compressedMsgs, simOpts)
+
+	// 5. NLP-enhanced rewrite with full conversation context
+	rewriter := rewrite.NewRewriter(dedupedMsgs)
+	optimizedMsgs := make([]types.Message, 0, len(dedupedMsgs))
 	for _, msg := range dedupedMsgs {
-		rewritten := rewrite.RewriteMessage(msg, req.Mode)
+		rewritten := rewriter.RewriteMessage(msg, req.Mode)
 		if rewritten == "" {
 			continue
 		}
@@ -57,13 +82,13 @@ func Optimize(req types.OptimizeRequest) types.OptimizeResponse {
 		})
 	}
 
-	// 3. Tokens after
+	// 6. Tokens after
 	tokensAfter := 0
 	for _, msg := range optimizedMsgs {
 		tokensAfter += tok.CountTokens(msg.Content)
 	}
 
-	// 4. Calculate stats
+	// 7. Calculate stats
 	savings := 0.0
 	if tokensBefore > 0 {
 		savings = float64(tokensBefore-tokensAfter) / float64(tokensBefore)
