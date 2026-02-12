@@ -18,7 +18,6 @@
 go.work
 
 # Project specific
-distill
 coverage.txt
 profile.out
 
